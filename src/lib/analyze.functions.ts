@@ -18,6 +18,36 @@ const SIGNAL_KEYS = [
   "mobile_application",
 ] as const;
 
+type SignalKey = (typeof SIGNAL_KEYS)[number];
+type SignalLevel = "High" | "High-Medium" | "Medium" | "Low" | "None";
+
+const FALLBACK_SIGNAL_RULES: Record<SignalKey, { label: string; keywords: string[] }> = {
+  customer_support: {
+    label: "Customer Support",
+    keywords: ["contact", "support", "customer service", "help", "call center", "ติดต่อ", "บริการลูกค้า", "สอบถาม", "ช่วยเหลือ"],
+  },
+  service_24_7: {
+    label: "24/7 Service",
+    keywords: ["24/7", "24 hours", "24 ชม", "ตลอด 24", "ทุกวัน", "always open"],
+  },
+  booking_system: {
+    label: "Booking System",
+    keywords: ["booking", "reservation", "appointment", "จอง", "นัดหมาย", "สำรอง", "book now"],
+  },
+  line_oa: {
+    label: "LINE OA",
+    keywords: ["line", "line oa", "line official", "@", "ไลน์"],
+  },
+  facebook_instagram: {
+    label: "Facebook / Instagram",
+    keywords: ["facebook", "instagram", "fb.com", "ig", "social", "เฟซบุ๊ก", "อินสตาแกรม"],
+  },
+  mobile_application: {
+    label: "Mobile Application",
+    keywords: ["mobile app", "application", "app store", "google play", "ios", "android", "แอป", "แอปพลิเคชัน"],
+  },
+};
+
 const SignalSchema = z.object({
   level: z.enum(["High", "High-Medium", "Medium", "Low", "None"]),
   evidence: z.string(),
