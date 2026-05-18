@@ -274,15 +274,21 @@ Signals ที่ต้องประเมิน:
 === DATA ===
 ${corpus.slice(0, 25000)}`;
 
-    const { text } = await generateText({
-      model,
-      prompt:
-        prompt +
-        `\n\n=== OUTPUT FORMAT ===\nตอบกลับเป็น JSON object เท่านั้น (ไม่มีข้อความอื่น ไม่มี markdown code fence) ตาม schema นี้:\n` +
-        `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "service_24_7": { ... },\n    "booking_system": { ... },\n    "line_oa": { ... },\n    "facebook_instagram": { ... },\n    "mobile_application": { ... }\n  },\n  "recommendations": string[] (สูงสุด 6 ข้อ)\n}`,
-    });
-    const parsed = extractJsonFromResponse(text);
-    const analysis = ResultSchema.parse(parsed);
+    let analysis: AnalysisResult;
+    try {
+      const { text } = await generateText({
+        model,
+        prompt:
+          prompt +
+          `\n\n=== OUTPUT FORMAT ===\nตอบกลับเป็น JSON object เท่านั้น (ไม่มีข้อความอื่น ไม่มี markdown code fence) ตาม schema นี้:\n` +
+          `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "service_24_7": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "booking_system": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "line_oa": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "facebook_instagram": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "mobile_application": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string }\n  },\n  "recommendations": string[]\n}`,
+      });
+      const parsed = extractJsonFromResponse(text);
+      analysis = ResultSchema.parse(parsed);
+    } catch (error) {
+      console.error("AI analysis output failed, using fallback analysis", error);
+      analysis = createFallbackAnalysis(corpus, data.businessName);
+    }
 
     return {
       businessName: data.businessName,
