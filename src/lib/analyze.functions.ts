@@ -143,6 +143,45 @@ function extractJsonFromResponse(response: string): unknown {
   }
 }
 
+function createFallbackAnalysis(corpus: string, businessName: string): AnalysisResult {
+  const lowerCorpus = corpus.toLowerCase();
+  const signals = Object.fromEntries(
+    SIGNAL_KEYS.map((key) => {
+      const rule = FALLBACK_SIGNAL_RULES[key];
+      const matched = rule.keywords.filter((keyword) => lowerCorpus.includes(keyword.toLowerCase()));
+      const level: SignalLevel = matched.length >= 2 ? "High" : matched.length === 1 ? "Medium" : "Low";
+      return [
+        key,
+        {
+          level,
+          evidence: matched.length
+            ? `พบ signal ที่เกี่ยวข้องกับ ${rule.label}: ${matched.slice(0, 4).join(", ")}`
+            : `ยังไม่พบหลักฐานชัดเจนเกี่ยวกับ ${rule.label} จากข้อมูลที่ scrape ได้`,
+          source: matched.length ? "Scraped content" : "No clear source",
+        },
+      ];
+    }),
+  ) as AnalysisResult["signals"];
+
+  const score = Math.round(
+    SIGNAL_KEYS.reduce((sum, key) => {
+      const level = signals[key].level;
+      return sum + (level === "High" ? 100 : level === "High-Medium" ? 80 : level === "Medium" ? 60 : level === "Low" ? 30 : 0);
+    }, 0) / SIGNAL_KEYS.length,
+  );
+
+  return {
+    summary: `วิเคราะห์ ${businessName} จากข้อมูลที่ scrape ได้แล้ว แต่ AI ส่งรูปแบบข้อมูลไม่สมบูรณ์ ระบบจึงใช้ fallback analysis จาก keyword signals เพื่อให้รายงานไม่ล้ม`,
+    ai_readiness_score: score,
+    signals,
+    recommendations: [
+      "เพิ่มข้อมูลช่องทางติดต่อและ customer support ให้ชัดเจนบนหน้าเว็บไซต์",
+      "ระบุเวลาทำการหรือบริการ 24/7 หากมี เพื่อเพิ่มความมั่นใจให้ลูกค้า",
+      "เชื่อมระบบจอง/นัดหมายหรือ LINE OA ให้ค้นเจอได้ง่ายขึ้น",
+    ],
+  };
+}
+
 export const analyzeBusinessSignals = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }) => {
