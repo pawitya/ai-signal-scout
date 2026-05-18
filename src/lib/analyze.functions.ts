@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { generateText, Output } from "ai";
+import { generateText } from "ai";
 import { createLovableAiGatewayProvider } from "./ai-gateway";
 
 const InputSchema = z.object({
@@ -96,6 +96,23 @@ async function firecrawlSearch(query: string, apiKey: string) {
   }
 }
 
+function extractJsonFromResponse(response: string): unknown {
+  let cleaned = response.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const start = cleaned.search(/[\{\[]/);
+  if (start === -1) throw new Error("No JSON found in AI response");
+  const opening = cleaned[start];
+  const closing = opening === "[" ? "]" : "}";
+  const end = cleaned.lastIndexOf(closing);
+  if (end === -1 || end < start) throw new Error("Malformed JSON in AI response");
+  cleaned = cleaned.substring(start, end + 1);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    cleaned = cleaned.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]").replace(/[\x00-\x1F\x7F]/g, "");
+    return JSON.parse(cleaned);
+  }
+}
+
 export const analyzeBusinessSignals = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }) => {
@@ -188,15 +205,19 @@ Signals ที่ต้องประเมิน:
 === DATA ===
 ${corpus.slice(0, 25000)}`;
 
-    const { experimental_output } = await generateText({
+    const { text } = await generateText({
       model,
-      experimental_output: Output.object({ schema: ResultSchema }),
-      prompt,
+      prompt:
+        prompt +
+        `\n\n=== OUTPUT FORMAT ===\nตอบกลับเป็น JSON object เท่านั้น (ไม่มีข้อความอื่น ไม่มี markdown code fence) ตาม schema นี้:\n` +
+        `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "service_24_7": { ... },\n    "booking_system": { ... },\n    "line_oa": { ... },\n    "facebook_instagram": { ... },\n    "mobile_application": { ... }\n  },\n  "recommendations": string[] (สูงสุด 6 ข้อ)\n}`,
     });
+    const parsed = extractJsonFromResponse(text);
+    const analysis = ResultSchema.parse(parsed);
 
     return {
       businessName: data.businessName,
       sources: sources.map((s) => ({ source: s.source, url: s.url, title: s.title })),
-      analysis: experimental_output,
+      analysis,
     };
   });
