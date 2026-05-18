@@ -18,6 +18,36 @@ const SIGNAL_KEYS = [
   "mobile_application",
 ] as const;
 
+type SignalKey = (typeof SIGNAL_KEYS)[number];
+type SignalLevel = "High" | "High-Medium" | "Medium" | "Low" | "None";
+
+const FALLBACK_SIGNAL_RULES: Record<SignalKey, { label: string; keywords: string[] }> = {
+  customer_support: {
+    label: "Customer Support",
+    keywords: ["contact", "support", "customer service", "help", "call center", "ติดต่อ", "บริการลูกค้า", "สอบถาม", "ช่วยเหลือ"],
+  },
+  service_24_7: {
+    label: "24/7 Service",
+    keywords: ["24/7", "24 hours", "24 ชม", "ตลอด 24", "ทุกวัน", "always open"],
+  },
+  booking_system: {
+    label: "Booking System",
+    keywords: ["booking", "reservation", "appointment", "จอง", "นัดหมาย", "สำรอง", "book now"],
+  },
+  line_oa: {
+    label: "LINE OA",
+    keywords: ["line", "line oa", "line official", "@", "ไลน์"],
+  },
+  facebook_instagram: {
+    label: "Facebook / Instagram",
+    keywords: ["facebook", "instagram", "fb.com", "ig", "social", "เฟซบุ๊ก", "อินสตาแกรม"],
+  },
+  mobile_application: {
+    label: "Mobile Application",
+    keywords: ["mobile app", "application", "app store", "google play", "ios", "android", "แอป", "แอปพลิเคชัน"],
+  },
+};
+
 const SignalSchema = z.object({
   level: z.enum(["High", "High-Medium", "Medium", "Low", "None"]),
   evidence: z.string(),
@@ -113,6 +143,45 @@ function extractJsonFromResponse(response: string): unknown {
   }
 }
 
+function createFallbackAnalysis(corpus: string, businessName: string): AnalysisResult {
+  const lowerCorpus = corpus.toLowerCase();
+  const signals = Object.fromEntries(
+    SIGNAL_KEYS.map((key) => {
+      const rule = FALLBACK_SIGNAL_RULES[key];
+      const matched = rule.keywords.filter((keyword) => lowerCorpus.includes(keyword.toLowerCase()));
+      const level: SignalLevel = matched.length >= 2 ? "High" : matched.length === 1 ? "Medium" : "Low";
+      return [
+        key,
+        {
+          level,
+          evidence: matched.length
+            ? `พบ signal ที่เกี่ยวข้องกับ ${rule.label}: ${matched.slice(0, 4).join(", ")}`
+            : `ยังไม่พบหลักฐานชัดเจนเกี่ยวกับ ${rule.label} จากข้อมูลที่ scrape ได้`,
+          source: matched.length ? "Scraped content" : "No clear source",
+        },
+      ];
+    }),
+  ) as AnalysisResult["signals"];
+
+  const score = Math.round(
+    SIGNAL_KEYS.reduce((sum, key) => {
+      const level = signals[key].level;
+      return sum + (level === "High" ? 100 : level === "High-Medium" ? 80 : level === "Medium" ? 60 : level === "Low" ? 30 : 0);
+    }, 0) / SIGNAL_KEYS.length,
+  );
+
+  return {
+    summary: `วิเคราะห์ ${businessName} จากข้อมูลที่ scrape ได้แล้ว แต่ AI ส่งรูปแบบข้อมูลไม่สมบูรณ์ ระบบจึงใช้ fallback analysis จาก keyword signals เพื่อให้รายงานไม่ล้ม`,
+    ai_readiness_score: score,
+    signals,
+    recommendations: [
+      "เพิ่มข้อมูลช่องทางติดต่อและ customer support ให้ชัดเจนบนหน้าเว็บไซต์",
+      "ระบุเวลาทำการหรือบริการ 24/7 หากมี เพื่อเพิ่มความมั่นใจให้ลูกค้า",
+      "เชื่อมระบบจอง/นัดหมายหรือ LINE OA ให้ค้นเจอได้ง่ายขึ้น",
+    ],
+  };
+}
+
 export const analyzeBusinessSignals = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }) => {
@@ -205,15 +274,21 @@ Signals ที่ต้องประเมิน:
 === DATA ===
 ${corpus.slice(0, 25000)}`;
 
-    const { text } = await generateText({
-      model,
-      prompt:
-        prompt +
-        `\n\n=== OUTPUT FORMAT ===\nตอบกลับเป็น JSON object เท่านั้น (ไม่มีข้อความอื่น ไม่มี markdown code fence) ตาม schema นี้:\n` +
-        `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "service_24_7": { ... },\n    "booking_system": { ... },\n    "line_oa": { ... },\n    "facebook_instagram": { ... },\n    "mobile_application": { ... }\n  },\n  "recommendations": string[] (สูงสุด 6 ข้อ)\n}`,
-    });
-    const parsed = extractJsonFromResponse(text);
-    const analysis = ResultSchema.parse(parsed);
+    let analysis: AnalysisResult;
+    try {
+      const { text } = await generateText({
+        model,
+        prompt:
+          prompt +
+          `\n\n=== OUTPUT FORMAT ===\nตอบกลับเป็น JSON object เท่านั้น (ไม่มีข้อความอื่น ไม่มี markdown code fence) ตาม schema นี้:\n` +
+          `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "service_24_7": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "booking_system": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "line_oa": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "facebook_instagram": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "mobile_application": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string }\n  },\n  "recommendations": string[]\n}`,
+      });
+      const parsed = extractJsonFromResponse(text);
+      analysis = ResultSchema.parse(parsed);
+    } catch (error) {
+      console.error("AI analysis output failed, using fallback analysis", error);
+      analysis = createFallbackAnalysis(corpus, data.businessName);
+    }
 
     return {
       businessName: data.businessName,
