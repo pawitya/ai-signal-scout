@@ -39,22 +39,14 @@ export const Route = createFileRoute("/")({
 
 const SIGNAL_META: Record<
   keyof AnalysisResult["signals"],
-  { label: string; icon: typeof Headphones; expected: string }
+  { label: string; icon: typeof Headphones }
 > = {
-  customer_support: { label: "Customer Support", icon: Headphones, expected: "High" },
-  service_24_7: { label: "24/7 Service", icon: Clock, expected: "High" },
-  booking_system: { label: "Booking System", icon: CalendarCheck, expected: "High" },
-  line_oa: { label: "LINE OA", icon: MessageCircle, expected: "High" },
-  facebook_instagram: { label: "Facebook / Instagram", icon: Facebook, expected: "High-Medium" },
-  mobile_application: { label: "Mobile Application", icon: Smartphone, expected: "High" },
-};
-
-const LEVEL_STYLES: Record<string, string> = {
-  High: "bg-[color:var(--success)]/15 text-[color:var(--success)] border-[color:var(--success)]/30",
-  "High-Medium": "bg-primary/10 text-primary border-primary/30",
-  Medium: "bg-[color:var(--warning)]/15 text-[color:var(--warning)] border-[color:var(--warning)]/30",
-  Low: "bg-muted text-muted-foreground border-border",
-  None: "bg-destructive/10 text-destructive border-destructive/30",
+  customer_support: { label: "Customer Support", icon: Headphones },
+  service_24_7: { label: "24/7 Service", icon: Clock },
+  booking_system: { label: "Booking System", icon: CalendarCheck },
+  line_oa: { label: "LINE OA", icon: MessageCircle },
+  facebook_instagram: { label: "Facebook / Instagram", icon: Facebook },
+  mobile_application: { label: "Mobile Application", icon: Smartphone },
 };
 
 type ServerResult = {
@@ -243,15 +235,16 @@ function Results({ data }: { data: ServerResult }) {
                     <Icon className="h-4 w-4" />
                   </div>
                   <span
-                    className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${LEVEL_STYLES[sig.level] ?? LEVEL_STYLES.Low}`}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                      sig.present
+                        ? "bg-[color:var(--success)]/15 text-[color:var(--success)] border-[color:var(--success)]/30"
+                        : "bg-destructive/10 text-destructive border-destructive/30"
+                    }`}
                   >
-                    {sig.level}
+                    {sig.present ? "True" : "False"}
                   </span>
                 </div>
                 <p className="mt-3 text-sm font-semibold">{meta.label}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Expected: <span className="font-medium">{meta.expected}</span>
-                </p>
                 <p className="mt-3 text-xs leading-relaxed text-foreground/80">{sig.evidence}</p>
                 {sig.source && (
                   <p className="mt-2 text-[11px] text-muted-foreground">📍 {sig.source}</p>
