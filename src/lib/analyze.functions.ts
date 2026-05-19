@@ -69,59 +69,91 @@ const ResultSchema = z.object({
 
 export type AnalysisResult = z.infer<typeof ResultSchema>;
 
-type FirecrawlScrape = {
+type ScrapeResult = {
   url: string;
   title?: string;
-  markdown?: string;
+  text?: string;
   error?: string;
 };
 
-async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlScrape> {
+function htmlToText(html: string): { title?: string; text: string } {
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch?.[1]?.trim();
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { title, text: cleaned };
+}
+
+async function scrapeUrl(url: string): Promise<ScrapeResult> {
   try {
-    const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
-      method: "POST",
+    const res = await fetch(url, {
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (compatible; AI-Signal-Scout/1.0; +https://lovable.app)",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "th,en;q=0.9",
       },
-      body: JSON.stringify({
-        url,
-        formats: ["markdown"],
-        onlyMainContent: true,
-      }),
     });
-    if (!res.ok) {
-      return { url, error: `HTTP ${res.status}` };
-    }
-    const data = await res.json() as { data?: { markdown?: string; metadata?: { title?: string } } };
-    return {
-      url,
-      title: data?.data?.metadata?.title,
-      markdown: (data?.data?.markdown ?? "").slice(0, 8000),
-    };
+    if (!res.ok) return { url, error: `HTTP ${res.status}` };
+    const html = await res.text();
+    const { title, text } = htmlToText(html);
+    return { url, title, text: text.slice(0, 8000) };
   } catch (e) {
     return { url, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
-async function firecrawlSearch(query: string, apiKey: string) {
+async function googleSearchScrape(query: string): Promise<Array<{ url: string; title?: string; description?: string }>> {
   try {
-    const res = await fetch("https://api.firecrawl.dev/v2/search", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const res = await fetch(
+      `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+          "Accept-Language": "th,en;q=0.9",
+        },
       },
-      body: JSON.stringify({ query, limit: 8 }),
-    });
-    if (!res.ok) return { error: `HTTP ${res.status}`, results: [] as Array<{ url: string; title?: string; description?: string }> };
-    const data = await res.json() as { data?: { web?: Array<{ url: string; title?: string; description?: string }> } | Array<{ url: string; title?: string; description?: string }> };
-    const list = Array.isArray(data?.data)
-      ? data.data
-      : (data?.data as { web?: Array<{ url: string; title?: string; description?: string }> })?.web ?? [];
-    return { results: list.slice(0, 8) };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e), results: [] };
+    );
+    if (!res.ok) return [];
+    const html = await res.text();
+    const results: Array<{ url: string; title?: string; description?: string }> = [];
+    const linkRe = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    const snippetRe = /<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+    const snippets: string[] = [];
+    let sm: RegExpExecArray | null;
+    while ((sm = snippetRe.exec(html)) !== null) {
+      snippets.push(htmlToText(sm[1]).text);
+    }
+    let m: RegExpExecArray | null;
+    let i = 0;
+    while ((m = linkRe.exec(html)) !== null && results.length < 8) {
+      let href = m[1];
+      // DuckDuckGo wraps real URLs: //duckduckgo.com/l/?uddg=...
+      const uddg = href.match(/[?&]uddg=([^&]+)/);
+      if (uddg) href = decodeURIComponent(uddg[1]);
+      results.push({
+        url: href,
+        title: htmlToText(m[2]).text,
+        description: snippets[i],
+      });
+      i++;
+    }
+    return results;
+  } catch {
+    return [];
   }
 }
 
