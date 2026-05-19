@@ -72,14 +72,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "AI Scrape Signal" },
+      { name: "description", content: "AI Signal Scout scrapes and analyzes AI adoption signals from websites and social media." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "AI Scrape Signal" },
+      { property: "og:description", content: "AI Signal Scout scrapes and analyzes AI adoption signals from websites and social media." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "AI Scrape Signal" },
+      { name: "twitter:description", content: "AI Signal Scout scrapes and analyzes AI adoption signals from websites and social media." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/cc744f87-2cdc-4c50-a8d0-9e4b7d9993fd/id-preview-ce98eec2--8c45a062-e969-4a53-bf72-49b46aff847e.lovable.app-1779183550512.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/cc744f87-2cdc-4c50-a8d0-9e4b7d9993fd/id-preview-ce98eec2--8c45a062-e969-4a53-bf72-49b46aff847e.lovable.app-1779183550512.png" },
     ],
     links: [
       {
