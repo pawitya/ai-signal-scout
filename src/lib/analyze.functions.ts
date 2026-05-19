@@ -19,7 +19,6 @@ const SIGNAL_KEYS = [
 ] as const;
 
 type SignalKey = (typeof SIGNAL_KEYS)[number];
-type SignalLevel = "High" | "High-Medium" | "Medium" | "Low" | "None";
 
 const FALLBACK_SIGNAL_RULES: Record<SignalKey, { label: string; keywords: string[] }> = {
   customer_support: {
@@ -49,7 +48,7 @@ const FALLBACK_SIGNAL_RULES: Record<SignalKey, { label: string; keywords: string
 };
 
 const SignalSchema = z.object({
-  level: z.enum(["High", "High-Medium", "Medium", "Low", "None"]),
+  present: z.boolean(),
   evidence: z.string(),
   source: z.string(),
 });
@@ -149,11 +148,11 @@ function createFallbackAnalysis(corpus: string, businessName: string): AnalysisR
     SIGNAL_KEYS.map((key) => {
       const rule = FALLBACK_SIGNAL_RULES[key];
       const matched = rule.keywords.filter((keyword) => lowerCorpus.includes(keyword.toLowerCase()));
-      const level: SignalLevel = matched.length >= 2 ? "High" : matched.length === 1 ? "Medium" : "Low";
+      const present = matched.length >= 1;
       return [
         key,
         {
-          level,
+          present,
           evidence: matched.length
             ? `พบ signal ที่เกี่ยวข้องกับ ${rule.label}: ${matched.slice(0, 4).join(", ")}`
             : `ยังไม่พบหลักฐานชัดเจนเกี่ยวกับ ${rule.label} จากข้อมูลที่ scrape ได้`,
@@ -164,10 +163,7 @@ function createFallbackAnalysis(corpus: string, businessName: string): AnalysisR
   ) as AnalysisResult["signals"];
 
   const score = Math.round(
-    SIGNAL_KEYS.reduce((sum, key) => {
-      const level = signals[key].level;
-      return sum + (level === "High" ? 100 : level === "High-Medium" ? 80 : level === "Medium" ? 60 : level === "Low" ? 30 : 0);
-    }, 0) / SIGNAL_KEYS.length,
+    (SIGNAL_KEYS.reduce((sum, key) => sum + (signals[key].present ? 100 : 0), 0) / SIGNAL_KEYS.length),
   );
 
   return {
@@ -250,7 +246,7 @@ export const analyzeBusinessSignals = createServerFn({ method: "POST" })
       .join("\n\n");
 
     const prompt = `คุณคือ AI Business Analyst วิเคราะห์ "AI Potential Usage Signals" ของธุรกิจ "${data.businessName}"
-จากข้อมูลที่ scrape ได้ด้านล่าง ให้ประเมินแต่ละ signal เป็น High / High-Medium / Medium / Low / None
+จากข้อมูลที่ scrape ได้ด้านล่าง ให้ประเมินแต่ละ signal เป็น true (มี/พบหลักฐาน) หรือ false (ไม่พบ)
 
 Signals ที่ต้องประเมิน:
 1. customer_support — มีช่องทาง customer support หรือไม่
@@ -260,16 +256,8 @@ Signals ที่ต้องประเมิน:
 5. facebook_instagram — active บน Facebook/Instagram หรือไม่
 6. mobile_application — มี Mobile App หรือไม่
 
-ระดับ default ที่คาดหวัง (ใช้เป็น guideline ถ้าเจอหลักฐานชัดเจน):
-- customer_support: High
-- service_24_7: High
-- booking_system: High
-- line_oa: High
-- facebook_instagram: High-Medium
-- mobile_application: High
-
 ตอบเป็นภาษาไทยใน field summary, evidence และ recommendations
-ให้ ai_readiness_score เป็น 0-100 (ยิ่ง signals สูง = score สูง)
+ให้ ai_readiness_score เป็น 0-100 (ยิ่ง signals true เยอะ = score สูง)
 
 === DATA ===
 ${corpus.slice(0, 25000)}`;
@@ -281,7 +269,7 @@ ${corpus.slice(0, 25000)}`;
         prompt:
           prompt +
           `\n\n=== OUTPUT FORMAT ===\nตอบกลับเป็น JSON object เท่านั้น (ไม่มีข้อความอื่น ไม่มี markdown code fence) ตาม schema นี้:\n` +
-          `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "service_24_7": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "booking_system": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "line_oa": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "facebook_instagram": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string },\n    "mobile_application": { "level": "High"|"High-Medium"|"Medium"|"Low"|"None", "evidence": string, "source": string }\n  },\n  "recommendations": string[]\n}`,
+          `{\n  "summary": string,\n  "ai_readiness_score": number (0-100),\n  "signals": {\n    "customer_support": { "present": boolean, "evidence": string, "source": string },\n    "service_24_7": { "present": boolean, "evidence": string, "source": string },\n    "booking_system": { "present": boolean, "evidence": string, "source": string },\n    "line_oa": { "present": boolean, "evidence": string, "source": string },\n    "facebook_instagram": { "present": boolean, "evidence": string, "source": string },\n    "mobile_application": { "present": boolean, "evidence": string, "source": string }\n  },\n  "recommendations": string[]\n}`,
       });
       const parsed = extractJsonFromResponse(text);
       analysis = ResultSchema.parse(parsed);
