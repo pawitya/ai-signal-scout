@@ -203,7 +203,7 @@ function Results({ data }: { data: ServerResult }) {
   const signalKeys = Object.keys(SIGNAL_META) as Array<keyof typeof SIGNAL_META>;
   const trueCount = signalKeys.filter((k) => analysis.signals[k]?.present).length;
   const totalCount = signalKeys.length;
-  const signalScore = Math.round((trueCount / totalCount) * 100);
+  const signalScore = Math.round((trueCount / totalCount) * 10);
 
   return (
     <section className="mx-auto mt-12 max-w-5xl space-y-8">
@@ -213,25 +213,15 @@ function Results({ data }: { data: ServerResult }) {
           <h2 className="mt-1 text-2xl font-bold tracking-tight">{businessName}</h2>
           <p className="mt-3 text-sm text-muted-foreground">{analysis.summary}</p>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <div>
-              <p className="text-xs text-muted-foreground">AI Readiness Score</p>
-              <p className="text-4xl font-bold tabular-nums text-primary">
-                {analysis.ai_readiness_score}
-                <span className="text-base font-normal text-muted-foreground">/100</span>
-              </p>
-              <Progress value={analysis.ai_readiness_score} className="mt-2" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">
-                Signal Score ({trueCount}/{totalCount} signals)
-              </p>
-              <p className="text-4xl font-bold tabular-nums text-primary">
-                {signalScore}
-                <span className="text-base font-normal text-muted-foreground">/100</span>
-              </p>
-              <Progress value={signalScore} className="mt-2" />
-            </div>
+          <div className="mt-6">
+            <p className="text-xs text-muted-foreground">
+              Signal Score ({trueCount}/{totalCount} signals)
+            </p>
+            <p className="text-4xl font-bold tabular-nums text-primary">
+              {signalScore}
+              <span className="text-base font-normal text-muted-foreground">/10</span>
+            </p>
+            <Progress value={signalScore * 10} className="mt-2" />
           </div>
         </div>
       </Card>
