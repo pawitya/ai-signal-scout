@@ -200,6 +200,11 @@ function Index() {
 function Results({ data }: { data: ServerResult }) {
   const { analysis, sources, businessName } = data;
 
+  const signalKeys = Object.keys(SIGNAL_META) as Array<keyof typeof SIGNAL_META>;
+  const trueCount = signalKeys.filter((k) => analysis.signals[k]?.present).length;
+  const totalCount = signalKeys.length;
+  const signalScore = Math.round((trueCount / totalCount) * 100);
+
   return (
     <section className="mx-auto mt-12 max-w-5xl space-y-8">
       <Card className="overflow-hidden border-border bg-card p-0 shadow-[var(--shadow-card)]">
@@ -208,15 +213,25 @@ function Results({ data }: { data: ServerResult }) {
           <h2 className="mt-1 text-2xl font-bold tracking-tight">{businessName}</h2>
           <p className="mt-3 text-sm text-muted-foreground">{analysis.summary}</p>
 
-          <div className="mt-6 flex items-end gap-4">
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div>
               <p className="text-xs text-muted-foreground">AI Readiness Score</p>
               <p className="text-4xl font-bold tabular-nums text-primary">
                 {analysis.ai_readiness_score}
                 <span className="text-base font-normal text-muted-foreground">/100</span>
               </p>
+              <Progress value={analysis.ai_readiness_score} className="mt-2" />
             </div>
-            <Progress value={analysis.ai_readiness_score} className="mb-2 flex-1" />
+            <div>
+              <p className="text-xs text-muted-foreground">
+                Signal Score ({trueCount}/{totalCount} signals)
+              </p>
+              <p className="text-4xl font-bold tabular-nums text-primary">
+                {signalScore}
+                <span className="text-base font-normal text-muted-foreground">/100</span>
+              </p>
+              <Progress value={signalScore} className="mt-2" />
+            </div>
           </div>
         </div>
       </Card>
