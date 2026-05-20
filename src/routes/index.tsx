@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   Sparkles,
@@ -15,6 +14,9 @@ import {
   Smartphone,
   ArrowRight,
   CheckCircle2,
+  Plus,
+  Trash2,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,26 +57,157 @@ type ServerResult = {
   analysis: AnalysisResult;
 };
 
+type Company = { id: string; businessName: string; website: string; facebook: string };
+type ScanItem = {
+  id: string;
+  businessName: string;
+  status: "pending" | "scanning" | "done" | "error";
+  error?: string;
+  result?: ServerResult;
+};
+
+const SIGNAL_KEYS_ORDER: Array<keyof AnalysisResult["signals"]> = [
+  "customer_support",
+  "service_24_7",
+  "booking_system",
+  "line_oa",
+  "facebook_instagram",
+  "mobile_application",
+];
+
+function uid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function downloadFile(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function buildCsv(items: ScanItem[]): string {
+  const headers = [
+    "business_name",
+    "status",
+    "signal_score_10",
+    "true_count",
+    "summary",
+    ...SIGNAL_KEYS_ORDER.flatMap((k) => [`${k}__present`, `${k}__evidence`, `${k}__source`]),
+    "recommendations",
+    "sources",
+  ];
+  const rows = items.map((it) => {
+    const a = it.result?.analysis;
+    const trueCount = a ? SIGNAL_KEYS_ORDER.filter((k) => a.signals[k]?.present).length : 0;
+    const score = a ? Math.round((trueCount / SIGNAL_KEYS_ORDER.length) * 10) : "";
+    const sigCols = SIGNAL_KEYS_ORDER.flatMap((k) => {
+      const s = a?.signals[k];
+      return [s?.present ?? "", s?.evidence ?? "", s?.source ?? ""];
+    });
+    return [
+      it.businessName,
+      it.status === "error" ? `error: ${it.error ?? ""}` : it.status,
+      score,
+      a ? trueCount : "",
+      a?.summary ?? "",
+      ...sigCols,
+      a?.recommendations?.join(" | ") ?? "",
+      it.result?.sources?.map((s) => `${s.source}: ${s.url}`).join(" | ") ?? "",
+    ].map(csvEscape).join(",");
+  });
+  return [headers.join(","), ...rows].join("\n");
+}
+
 function Index() {
   const analyze = useServerFn(analyzeBusinessSignals);
-  const [businessName, setBusinessName] = useState("");
-  const [website, setWebsite] = useState("");
-  const [facebook, setFacebook] = useState("");
+  const [companies, setCompanies] = useState<Company[]>([
+    { id: uid(), businessName: "", website: "", facebook: "" },
+  ]);
+  const [scans, setScans] = useState<ScanItem[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
 
-  const mutation = useMutation<ServerResult, Error, void>({
-    mutationFn: async () => {
-      const res = await analyze({
-        data: {
-          businessName: businessName.trim(),
-          website: website.trim(),
-          facebook: facebook.trim(),
-        },
-      });
-      return res as ServerResult;
-    },
-  });
+  const updateCompany = (id: string, patch: Partial<Company>) =>
+    setCompanies((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const addCompany = () =>
+    setCompanies((cs) => [...cs, { id: uid(), businessName: "", website: "", facebook: "" }]);
+  const removeCompany = (id: string) =>
+    setCompanies((cs) => (cs.length === 1 ? cs : cs.filter((c) => c.id !== id)));
 
-  const result = mutation.data;
+  const valid = companies.filter(
+    (c) => c.businessName.trim() && (c.website.trim() || c.facebook.trim()),
+  );
+  const canScan = valid.length > 0 && !isScanning;
+
+  const runScan = async () => {
+    setIsScanning(true);
+    const initial: ScanItem[] = valid.map((c) => ({
+      id: c.id,
+      businessName: c.businessName.trim(),
+      status: "pending",
+    }));
+    setScans(initial);
+
+    for (const c of valid) {
+      setScans((prev) =>
+        prev.map((s) => (s.id === c.id ? { ...s, status: "scanning" } : s)),
+      );
+      try {
+        const res = (await analyze({
+          data: {
+            businessName: c.businessName.trim(),
+            website: c.website.trim(),
+            facebook: c.facebook.trim(),
+          },
+        })) as ServerResult;
+        setScans((prev) =>
+          prev.map((s) => (s.id === c.id ? { ...s, status: "done", result: res } : s)),
+        );
+      } catch (e) {
+        setScans((prev) =>
+          prev.map((s) =>
+            s.id === c.id
+              ? { ...s, status: "error", error: e instanceof Error ? e.message : String(e) }
+              : s,
+          ),
+        );
+      }
+    }
+    setIsScanning(false);
+  };
+
+  const doneScans = scans.filter((s) => s.status === "done");
+
+  const handleDownloadJson = () => {
+    const payload = scans.map((s) => ({
+      businessName: s.businessName,
+      status: s.status,
+      error: s.error,
+      result: s.result,
+    }));
+    downloadFile(
+      `ai-signal-scan-${new Date().toISOString().slice(0, 19)}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json",
+    );
+  };
+
+  const handleDownloadCsv = () => {
+    downloadFile(
+      `ai-signal-scan-${new Date().toISOString().slice(0, 19)}.csv`,
+      buildCsv(scans),
+      "text/csv",
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -106,95 +239,174 @@ function Index() {
           </span>
           <h1 className="mt-5 text-4xl font-bold tracking-tight sm:text-5xl">
             วิเคราะห์ <span className="bg-[image:var(--gradient-primary)] bg-clip-text text-transparent">AI Potential</span>
-            <br />ของธุรกิจในไม่กี่วินาที
+            <br />ของหลายธุรกิจในไม่กี่วินาที
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground">
-            ใส่ชื่อธุรกิจ + URL — เรา scrape Website, Facebook และ Google Search
-            แล้ววิเคราะห์ 6 signals สำคัญให้อัตโนมัติ
+            เพิ่มได้หลายบริษัท — scan ทีละรายการแล้ว export ผลลัพธ์เป็น JSON / CSV
           </p>
         </section>
 
-        <Card id="scan" className="mx-auto max-w-3xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
-          <div className="grid gap-5">
-            <div className="grid gap-2">
-              <Label htmlFor="biz">ชื่อธุรกิจ *</Label>
-              <Input
-                id="biz"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="เช่น โรงพยาบาลกรุงเทพ, Café Amazon"
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="web" className="flex items-center gap-1.5">
-                  <Globe className="h-3.5 w-3.5" /> Website
-                </Label>
-                <Input
-                  id="web"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://example.com"
-                />
+        <Card id="scan" className="mx-auto max-w-4xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
+          <div className="space-y-5">
+            {companies.map((c, idx) => (
+              <div key={c.id} className="rounded-lg border border-border/60 bg-background/40 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    บริษัท #{idx + 1}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={companies.length === 1 || isScanning}
+                    onClick={() => removeCompany(c.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid gap-3">
+                  <div className="grid gap-2">
+                    <Label>ชื่อธุรกิจ *</Label>
+                    <Input
+                      value={c.businessName}
+                      disabled={isScanning}
+                      onChange={(e) => updateCompany(c.id, { businessName: e.target.value })}
+                      placeholder="เช่น โรงพยาบาลกรุงเทพ"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label className="flex items-center gap-1.5">
+                        <Globe className="h-3.5 w-3.5" /> Website
+                      </Label>
+                      <Input
+                        value={c.website}
+                        disabled={isScanning}
+                        onChange={(e) => updateCompany(c.id, { website: e.target.value })}
+                        placeholder="https://example.com"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="flex items-center gap-1.5">
+                        <Facebook className="h-3.5 w-3.5" /> Facebook
+                      </Label>
+                      <Input
+                        value={c.facebook}
+                        disabled={isScanning}
+                        onChange={(e) => updateCompany(c.id, { facebook: e.target.value })}
+                        placeholder="https://facebook.com/yourpage"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="fb" className="flex items-center gap-1.5">
-                  <Facebook className="h-3.5 w-3.5" /> Facebook Page
-                </Label>
-                <Input
-                  id="fb"
-                  value={facebook}
-                  onChange={(e) => setFacebook(e.target.value)}
-                  placeholder="https://facebook.com/yourpage"
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-3 pt-2">
-              <p className="text-xs text-muted-foreground">
-                * ระบุ Website หรือ Facebook อย่างน้อย 1 อย่าง
-              </p>
-              <Button
-                size="lg"
-                disabled={
-                  !businessName.trim() ||
-                  (!website.trim() && !facebook.trim()) ||
-                  mutation.isPending
-                }
-                onClick={() => mutation.mutate()}
-                className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
-              >
-                {mutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> กำลัง scan...
-                  </>
-                ) : (
-                  <>
-                    <Search className="h-4 w-4" /> Scan signals <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
+            ))}
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Button type="button" variant="outline" onClick={addCompany} disabled={isScanning}>
+                <Plus className="h-4 w-4" /> เพิ่มบริษัท
               </Button>
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-muted-foreground">
+                  พร้อม scan: <span className="font-semibold text-foreground">{valid.length}</span>
+                </p>
+                <Button
+                  size="lg"
+                  disabled={!canScan}
+                  onClick={runScan}
+                  className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
+                >
+                  {isScanning ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> กำลัง scan...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="h-4 w-4" /> Scan all <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </Card>
 
-        {mutation.isError && (
-          <div className="mx-auto mt-6 max-w-3xl rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            {(mutation.error as Error).message}
-          </div>
-        )}
+        {scans.length > 0 && (
+          <section className="mx-auto mt-10 max-w-5xl space-y-6">
+            <Card className="border-border bg-card p-5 shadow-[var(--shadow-card)]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Scan Progress</h3>
+                  <p className="text-xs text-muted-foreground">
+                    เสร็จแล้ว {doneScans.length}/{scans.length} บริษัท
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={doneScans.length === 0}
+                    onClick={handleDownloadJson}
+                  >
+                    <Download className="h-4 w-4" /> JSON
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={doneScans.length === 0}
+                    onClick={handleDownloadCsv}
+                  >
+                    <Download className="h-4 w-4" /> CSV
+                  </Button>
+                </div>
+              </div>
+              <ul className="mt-4 space-y-2">
+                {scans.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/40 px-3 py-2 text-sm"
+                  >
+                    <span className="truncate font-medium">{s.businessName}</span>
+                    <StatusBadge item={s} />
+                  </li>
+                ))}
+              </ul>
+            </Card>
 
-        {mutation.isPending && (
-          <div className="mx-auto mt-10 max-w-3xl space-y-3 text-center text-sm text-muted-foreground">
-            <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
-            <p>กำลัง scrape sources และวิเคราะห์ด้วย AI...</p>
-            <p className="text-xs">ใช้เวลา ~20-40 วินาที</p>
-          </div>
+            {doneScans.map((s) => s.result && <Results key={s.id} data={s.result} />)}
+          </section>
         )}
-
-        {result && <Results data={result} />}
       </main>
     </div>
   );
+}
+
+function StatusBadge({ item }: { item: ScanItem }) {
+  if (item.status === "done") {
+    return (
+      <span className="rounded-full border border-[color:var(--success)]/30 bg-[color:var(--success)]/15 px-2.5 py-0.5 text-xs font-semibold text-[color:var(--success)]">
+        Done
+      </span>
+    );
+  }
+  if (item.status === "scanning") {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-primary">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Scanning…
+      </span>
+    );
+  }
+  if (item.status === "error") {
+    return (
+      <span
+        title={item.error}
+        className="truncate rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-0.5 text-xs font-semibold text-destructive"
+      >
+        Error
+      </span>
+    );
+  }
+  return <span className="text-xs text-muted-foreground">Pending</span>;
 }
 
 function Results({ data }: { data: ServerResult }) {
