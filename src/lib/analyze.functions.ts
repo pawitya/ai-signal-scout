@@ -332,6 +332,7 @@ ${corpus.slice(0, 25000)}`;
     return {
       businessName: data.businessName,
       sources: sources.map((s) => ({ source: s.source, url: s.url, title: s.title })),
+      facebookStatus: fbStatus,
       analysis,
     };
   });
