@@ -51,6 +51,9 @@ const SignalSchema = z.object({
   present: z.boolean(),
   evidence: z.string(),
   source: z.string(),
+  evidence_url: z.string().optional().default(""),
+  evidence_snippet: z.string().optional().default(""),
+  confidence: z.enum(["high", "medium", "low"]).optional().default("medium"),
 });
 
 const ResultSchema = z.object({
@@ -74,6 +77,9 @@ type FirecrawlScrape = {
   title?: string;
   markdown?: string;
   error?: string;
+  httpStatus?: number;
+  reachable?: boolean;
+  unavailableReason?: string;
 };
 
 async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlScrape> {
@@ -93,11 +99,30 @@ async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlSc
     if (!res.ok) {
       return { url, error: `HTTP ${res.status}` };
     }
-    const data = await res.json() as { data?: { markdown?: string; metadata?: { title?: string } } };
+    const data = await res.json() as {
+      data?: { markdown?: string; metadata?: { title?: string; statusCode?: number } };
+    };
+    const md = (data?.data?.markdown ?? "").slice(0, 8000);
+    const status = data?.data?.metadata?.statusCode;
+    const lower = md.toLowerCase();
+    const deadHints = [
+      "this content isn't available",
+      "content isn't available right now",
+      "page isn't available",
+      "page not found",
+      "the link you followed may be broken",
+      "ลิงก์ที่คุณใช้อาจชำรุด",
+      "เนื้อหานี้ไม่พร้อมใช้งาน",
+      "ไม่พร้อมใช้งานในขณะนี้",
+    ];
+    const looksDead = md.trim().length < 200 || deadHints.some((h) => lower.includes(h));
     return {
       url,
       title: data?.data?.metadata?.title,
-      markdown: (data?.data?.markdown ?? "").slice(0, 8000),
+      markdown: md,
+      httpStatus: status,
+      reachable: !looksDead && (status === undefined || status < 400),
+      unavailableReason: looksDead ? "ตรวจพบหน้านี้ว่างเปล่า/ถูกลบ/ไม่พร้อมใช้งาน" : undefined,
     };
   } catch (e) {
     return { url, error: e instanceof Error ? e.message : String(e) };
