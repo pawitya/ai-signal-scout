@@ -35,7 +35,7 @@ const FALLBACK_SIGNAL_RULES: Record<SignalKey, { label: string; keywords: string
   },
   line_oa: {
     label: "LINE OA",
-    keywords: ["line", "line oa", "line official", "@", "ไลน์"],
+    keywords: ["lin.ee", "line.me/ti/p", "line oa", "line official", "@line", "ไลน์ ออฟฟิเชียล", "ไลน์ official"],
   },
   facebook_instagram: {
     label: "Facebook / Instagram",
