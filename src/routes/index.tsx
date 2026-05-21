@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Sparkles,
   Globe,
@@ -15,12 +15,18 @@ import {
   Smartphone,
   ArrowRight,
   CheckCircle2,
+  Upload,
+  Download,
+  FileJson,
+  FileSpreadsheet,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { analyzeBusinessSignals, type AnalysisResult } from "@/lib/analyze.functions";
 
 export const Route = createFileRoute("/")({
@@ -52,8 +58,110 @@ const SIGNAL_META: Record<
 type ServerResult = {
   businessName: string;
   sources: Array<{ source: string; url: string; title?: string }>;
+  facebookStatus?: { url: string; reachable: boolean; reason?: string } | null;
   analysis: AnalysisResult;
 };
+
+type BatchRow = {
+  businessName: string;
+  website: string;
+  facebook: string;
+  status: "pending" | "scanning" | "done" | "error";
+  error?: string;
+  result?: ServerResult;
+};
+
+const SIGNAL_KEYS = [
+  "customer_support",
+  "service_24_7",
+  "booking_system",
+  "line_oa",
+  "facebook_instagram",
+  "mobile_application",
+] as const;
+
+function parseCsv(text: string): Array<Record<string, string>> {
+  // Minimal CSV parser with quoted field support
+  const rows: string[][] = [];
+  let cur: string[] = [];
+  let field = "";
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQ = false;
+      else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ",") { cur.push(field); field = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (field.length || cur.length) { cur.push(field); rows.push(cur); cur = []; field = ""; }
+        if (c === "\r" && text[i + 1] === "\n") i++;
+      } else field += c;
+    }
+  }
+  if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+  if (rows.length === 0) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
+  return rows.slice(1).filter((r) => r.some((c) => c.trim())).map((r) => {
+    const obj: Record<string, string> = {};
+    headers.forEach((h, i) => { obj[h] = (r[i] ?? "").trim(); });
+    return obj;
+  });
+}
+
+function csvEscape(v: string): string {
+  if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+  return v;
+}
+
+function resultsToCsv(results: ServerResult[]): string {
+  const header = [
+    "businessName", "summary", "ai_readiness_score", "signal_score_10",
+    "facebook_url", "facebook_reachable", "facebook_reason",
+    ...SIGNAL_KEYS.flatMap((k) => [
+      `${k}__present`, `${k}__confidence`, `${k}__evidence`, `${k}__evidence_url`, `${k}__evidence_snippet`, `${k}__source`,
+    ]),
+    "recommendations",
+  ];
+  const lines = [header.join(",")];
+  for (const r of results) {
+    const a = r.analysis;
+    const trueCount = SIGNAL_KEYS.filter((k) => a.signals[k]?.present).length;
+    const score10 = Math.round((trueCount / SIGNAL_KEYS.length) * 10);
+    const row: string[] = [
+      r.businessName, a.summary, String(a.ai_readiness_score), String(score10),
+      r.facebookStatus?.url ?? "",
+      r.facebookStatus ? String(r.facebookStatus.reachable) : "",
+      r.facebookStatus?.reason ?? "",
+    ];
+    for (const k of SIGNAL_KEYS) {
+      const s = a.signals[k];
+      row.push(
+        String(s.present),
+        s.confidence ?? "",
+        s.evidence ?? "",
+        s.evidence_url ?? "",
+        s.evidence_snippet ?? "",
+        s.source ?? "",
+      );
+    }
+    row.push(a.recommendations.join(" | "));
+    lines.push(row.map(csvEscape).join(","));
+  }
+  return lines.join("\n");
+}
+
+function downloadFile(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function Index() {
   const analyze = useServerFn(analyzeBusinessSignals);
@@ -115,7 +223,13 @@ function Index() {
         </section>
 
         <Card id="scan" className="mx-auto max-w-3xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
-          <div className="grid gap-5">
+          <Tabs defaultValue="single">
+            <TabsList className="mb-5">
+              <TabsTrigger value="single">Single scan</TabsTrigger>
+              <TabsTrigger value="batch">Batch (CSV upload)</TabsTrigger>
+            </TabsList>
+            <TabsContent value="single">
+              <div className="grid gap-5">
             <div className="grid gap-2">
               <Label htmlFor="biz">ชื่อธุรกิจ *</Label>
               <Input
@@ -174,7 +288,12 @@ function Index() {
                 )}
               </Button>
             </div>
-          </div>
+              </div>
+            </TabsContent>
+            <TabsContent value="batch">
+              <BatchScan analyze={analyze} />
+            </TabsContent>
+          </Tabs>
         </Card>
 
         {mutation.isError && (
