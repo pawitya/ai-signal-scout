@@ -317,7 +317,7 @@ function Index() {
 }
 
 function Results({ data }: { data: ServerResult }) {
-  const { analysis, sources, businessName } = data;
+  const { analysis, sources, businessName, facebookStatus } = data;
 
   const signalKeys = Object.keys(SIGNAL_META) as Array<keyof typeof SIGNAL_META>;
   const trueCount = signalKeys.filter((k) => analysis.signals[k]?.present).length;
@@ -332,6 +332,17 @@ function Results({ data }: { data: ServerResult }) {
           <h2 className="mt-1 text-2xl font-bold tracking-tight">{businessName}</h2>
           <p className="mt-3 text-sm text-muted-foreground">{analysis.summary}</p>
 
+          {facebookStatus && !facebookStatus.reachable && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-semibold">Facebook URL ที่ส่งมาเข้าไม่ได้</p>
+                <p className="mt-0.5 break-all">{facebookStatus.url}</p>
+                <p className="mt-0.5">{facebookStatus.reason}</p>
+              </div>
+            </div>
+          )}
+
           <div className="mt-6">
             <p className="text-xs text-muted-foreground">
               Signal Score ({trueCount}/{totalCount} signals)
@@ -341,6 +352,31 @@ function Results({ data }: { data: ServerResult }) {
               <span className="text-base font-normal text-muted-foreground">/10</span>
             </p>
             <Progress value={signalScore * 10} className="mt-2" />
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => downloadFile(
+                `${businessName}-result.json`,
+                JSON.stringify(data, null, 2),
+                "application/json",
+              )}
+            >
+              <FileJson className="h-4 w-4" /> Download JSON
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => downloadFile(
+                `${businessName}-result.csv`,
+                resultsToCsv([data]),
+                "text/csv;charset=utf-8",
+              )}
+            >
+              <FileSpreadsheet className="h-4 w-4" /> Download CSV
+            </Button>
           </div>
         </div>
       </Card>
@@ -370,9 +406,29 @@ function Results({ data }: { data: ServerResult }) {
                 </div>
                 <p className="mt-3 text-sm font-semibold">{meta.label}</p>
                 <p className="mt-3 text-xs leading-relaxed text-foreground/80">{sig.evidence}</p>
-                {sig.source && (
-                  <p className="mt-2 text-[11px] text-muted-foreground">📍 {sig.source}</p>
+                {sig.evidence_snippet && (
+                  <p className="mt-2 rounded-md bg-muted/60 p-2 text-[11px] italic text-foreground/70">
+                    “{sig.evidence_snippet}”
+                  </p>
                 )}
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                  {sig.confidence && (
+                    <span className="rounded-sm border border-border px-1.5 py-0.5 uppercase tracking-wide">
+                      conf: {sig.confidence}
+                    </span>
+                  )}
+                  {sig.source && <span>📍 {sig.source}</span>}
+                  {sig.evidence_url && (
+                    <a
+                      href={sig.evidence_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-primary hover:underline"
+                    >
+                      ↗ ดูแหล่งที่มา
+                    </a>
+                  )}
+                </div>
               </Card>
             );
           })}
@@ -416,3 +472,174 @@ function Results({ data }: { data: ServerResult }) {
     </section>
   );
 }
+
+function BatchScan({
+  analyze,
+}: {
+  analyze: (args: { data: { businessName: string; website: string; facebook: string } }) => Promise<unknown>;
+}) {
+  const [rows, setRows] = useState<BatchRow[]>([]);
+  const [running, setRunning] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const done = useMemo(() => rows.filter((r) => r.status === "done" || r.status === "error").length, [rows]);
+  const completedResults = useMemo(
+    () => rows.filter((r): r is BatchRow & { result: ServerResult } => r.status === "done" && !!r.result).map((r) => r.result),
+    [rows],
+  );
+
+  const handleFile = async (file: File) => {
+    const text = await file.text();
+    const parsed = parseCsv(text);
+    const mapped: BatchRow[] = parsed
+      .map((r) => ({
+        businessName: r["businessname"] || r["business_name"] || r["name"] || r["business"] || "",
+        website: r["website"] || r["url"] || r["web"] || "",
+        facebook: r["facebook"] || r["fb"] || r["facebook_url"] || "",
+        status: "pending" as const,
+      }))
+      .filter((r) => r.businessName && (r.website || r.facebook));
+    setRows(mapped);
+  };
+
+  const runAll = async () => {
+    setRunning(true);
+    for (let i = 0; i < rows.length; i++) {
+      setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "scanning" } : r)));
+      try {
+        const res = (await analyze({
+          data: {
+            businessName: rows[i].businessName,
+            website: rows[i].website,
+            facebook: rows[i].facebook,
+          },
+        })) as ServerResult;
+        setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "done", result: res } : r)));
+      } catch (e) {
+        setRows((prev) =>
+          prev.map((r, idx) =>
+            idx === i ? { ...r, status: "error", error: e instanceof Error ? e.message : String(e) } : r,
+          ),
+        );
+      }
+    }
+    setRunning(false);
+  };
+
+  return (
+    <div className="grid gap-4">
+      <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm">
+        <p className="font-medium">รูปแบบ CSV</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          ต้องมี header: <code className="rounded bg-muted px-1">businessName,website,facebook</code> —
+          แต่ละแถวต้องมี businessName และอย่างน้อย 1 ใน website/facebook
+        </p>
+        <pre className="mt-2 overflow-x-auto rounded bg-background p-2 text-[11px]">
+{`businessName,website,facebook
+โรงพยาบาลกรุงเทพ,https://www.bangkokhospital.com,https://facebook.com/bangkokhospitalclub
+Café Amazon,https://www.cafe-amazon.com,https://facebook.com/CafeAmazonOfficial`}
+        </pre>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleFile(f);
+            e.target.value = "";
+          }}
+        />
+        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={running}>
+          <Upload className="h-4 w-4" /> เลือกไฟล์ CSV
+        </Button>
+        <Button
+          onClick={runAll}
+          disabled={running || rows.length === 0}
+          className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
+        >
+          {running ? (<><Loader2 className="h-4 w-4 animate-spin" /> กำลัง scan {done}/{rows.length}</>) : (
+            <>เริ่ม scan {rows.length} บริษัท <ArrowRight className="h-4 w-4" /></>
+          )}
+        </Button>
+        {completedResults.length > 0 && (
+          <>
+            <Button
+              variant="outline"
+              onClick={() => downloadFile(
+                `batch-results-${Date.now()}.json`,
+                JSON.stringify(completedResults, null, 2),
+                "application/json",
+              )}
+            >
+              <FileJson className="h-4 w-4" /> Download JSON
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => downloadFile(
+                `batch-results-${Date.now()}.csv`,
+                resultsToCsv(completedResults),
+                "text/csv;charset=utf-8",
+              )}
+            >
+              <FileSpreadsheet className="h-4 w-4" /> Download CSV
+            </Button>
+          </>
+        )}
+      </div>
+
+      {rows.length > 0 && (
+        <>
+          <Progress value={(done / rows.length) * 100} />
+          <div className="max-h-80 overflow-y-auto rounded-md border border-border">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-muted/80 text-left">
+                <tr>
+                  <th className="p-2">#</th>
+                  <th className="p-2">Business</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Score</th>
+                  <th className="p-2">Signals (T/F)</th>
+                  <th className="p-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const sigs = r.result?.analysis.signals;
+                  const tcount = sigs ? SIGNAL_KEYS.filter((k) => sigs[k]?.present).length : 0;
+                  return (
+                    <tr key={i} className="border-t border-border">
+                      <td className="p-2 text-muted-foreground">{i + 1}</td>
+                      <td className="p-2 font-medium">{r.businessName}</td>
+                      <td className="p-2">
+                        {r.status === "pending" && <span className="text-muted-foreground">รอ</span>}
+                        {r.status === "scanning" && <span className="inline-flex items-center gap-1 text-primary"><Loader2 className="h-3 w-3 animate-spin" /> scanning</span>}
+                        {r.status === "done" && <span className="text-[color:var(--success)]">✓ done</span>}
+                        {r.status === "error" && <span className="text-destructive">✗ error</span>}
+                      </td>
+                      <td className="p-2 tabular-nums">{r.result ? `${Math.round((tcount / SIGNAL_KEYS.length) * 10)}/10` : "—"}</td>
+                      <td className="p-2 tabular-nums">{r.result ? `${tcount}/${SIGNAL_KEYS.length}` : "—"}</td>
+                      <td className="p-2 text-muted-foreground">
+                        {r.error
+                          ?? (r.result?.facebookStatus && !r.result.facebookStatus.reachable
+                            ? "⚠ FB ลิงก์เข้าไม่ได้"
+                            : "")}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Tag to keep Download icon imported even if unused above
+const _keepDownload = Download;
+void _keepDownload;
