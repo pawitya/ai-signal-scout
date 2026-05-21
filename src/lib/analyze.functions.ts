@@ -212,8 +212,7 @@ export const analyzeBusinessSignals = createServerFn({ method: "POST" })
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const sources: Array<{ source: string; url: string; title?: string; content: string }> = [];
-    const facebookStatus: { url: string; reachable: boolean; reason?: string } | null = null;
-    let fbStatus: { url: string; reachable: boolean; reason?: string } | null = facebookStatus;
+    let fbStatus: { url: string; reachable: boolean; reason?: string } | null = null;
 
     // 1) Official website
     if (data.website) {
