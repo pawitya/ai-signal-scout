@@ -212,6 +212,8 @@ export const analyzeBusinessSignals = createServerFn({ method: "POST" })
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const sources: Array<{ source: string; url: string; title?: string; content: string }> = [];
+    const facebookStatus: { url: string; reachable: boolean; reason?: string } | null = null;
+    let fbStatus: { url: string; reachable: boolean; reason?: string } | null = facebookStatus;
 
     // 1) Official website
     if (data.website) {
@@ -227,19 +229,32 @@ export const analyzeBusinessSignals = createServerFn({ method: "POST" })
     // 2) Facebook
     if (data.facebook) {
       const f = await firecrawlScrape(data.facebook, FIRECRAWL_API_KEY);
+      fbStatus = {
+        url: f.url,
+        reachable: !!f.reachable && !f.error,
+        reason: f.error
+          ? `Scrape failed: ${f.error}`
+          : f.unavailableReason ?? (f.reachable ? undefined : "ไม่พบเนื้อหาที่ใช้งานได้บนเพจ"),
+      };
       sources.push({
-        source: "Facebook",
+        source: fbStatus.reachable ? "Facebook (live)" : "Facebook (UNREACHABLE)",
         url: f.url,
         title: f.title,
-        content: f.markdown ?? `(scrape failed: ${f.error})`,
+        content: fbStatus.reachable
+          ? (f.markdown ?? "")
+          : `⚠️ FACEBOOK PAGE UNREACHABLE — ${fbStatus.reason}\n` +
+            `อย่าใช้ข้อมูลจากเพจนี้เป็นหลักฐาน เพราะหน้านี้อาจถูกลบ/ปิดการมองเห็น\n\n` +
+            (f.markdown ?? `(scrape failed: ${f.error ?? "unknown"})`),
       });
     }
 
     // 3) Google Search via Firecrawl
     const searchQueries = [
       `${data.businessName}`,
-      `${data.businessName} จองคิว booking`,
-      `${data.businessName} LINE OA application app`,
+      `${data.businessName} จองคิว booking reservation`,
+      `${data.businessName} LINE Official Account lin.ee line.me`,
+      `${data.businessName} mobile app application download`,
+      `${data.businessName} customer service contact 24 ชั่วโมง`,
     ];
     const searchResults: Array<{ query: string; url: string; title?: string; description?: string }> = [];
     for (const q of searchQueries) {
