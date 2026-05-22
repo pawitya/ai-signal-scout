@@ -1,12 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import {
   Sparkles,
   Globe,
   Facebook,
-  Search,
   Loader2,
   Headphones,
   Clock,
@@ -20,6 +18,8 @@ import {
   FileJson,
   FileSpreadsheet,
   AlertTriangle,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,7 +81,11 @@ const SIGNAL_KEYS = [
 ] as const;
 
 function parseCsv(text: string): Array<Record<string, string>> {
-  // Minimal CSV parser with quoted field support
+  // Minimal CSV parser with quoted field support. Strips UTF-8 BOM and
+  // auto-detects ; as separator if the first header line contains no commas.
+  text = text.replace(/^\uFEFF/, "");
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  const sep = firstLine.includes(",") ? "," : firstLine.includes(";") ? ";" : firstLine.includes("\t") ? "\t" : ",";
   const rows: string[][] = [];
   let cur: string[] = [];
   let field = "";
@@ -94,7 +98,7 @@ function parseCsv(text: string): Array<Record<string, string>> {
       else field += c;
     } else {
       if (c === '"') inQ = true;
-      else if (c === ",") { cur.push(field); field = ""; }
+      else if (c === sep) { cur.push(field); field = ""; }
       else if (c === "\n" || c === "\r") {
         if (field.length || cur.length) { cur.push(field); rows.push(cur); cur = []; field = ""; }
         if (c === "\r" && text[i + 1] === "\n") i++;
@@ -164,26 +168,6 @@ function downloadFile(filename: string, content: string, mime: string) {
 }
 
 function Index() {
-  const analyze = useServerFn(analyzeBusinessSignals);
-  const [businessName, setBusinessName] = useState("");
-  const [website, setWebsite] = useState("");
-  const [facebook, setFacebook] = useState("");
-
-  const mutation = useMutation<ServerResult, Error, void>({
-    mutationFn: async () => {
-      const res = await analyze({
-        data: {
-          businessName: businessName.trim(),
-          website: website.trim(),
-          facebook: facebook.trim(),
-        },
-      });
-      return res as ServerResult;
-    },
-  });
-
-  const result = mutation.data;
-
   return (
     <div className="min-h-screen bg-background">
       <div className="absolute inset-x-0 top-0 -z-10 h-[520px] bg-[image:var(--gradient-surface)]" />
@@ -222,95 +206,20 @@ function Index() {
           </p>
         </section>
 
-        <Card id="scan" className="mx-auto max-w-3xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
+        <Card id="scan" className="mx-auto max-w-4xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
           <Tabs defaultValue="single">
             <TabsList className="mb-5">
-              <TabsTrigger value="single">Single scan</TabsTrigger>
+              <TabsTrigger value="single">Manual scan</TabsTrigger>
               <TabsTrigger value="batch">Batch (CSV upload)</TabsTrigger>
             </TabsList>
             <TabsContent value="single">
-              <div className="grid gap-5">
-            <div className="grid gap-2">
-              <Label htmlFor="biz">ชื่อธุรกิจ *</Label>
-              <Input
-                id="biz"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="เช่น โรงพยาบาลกรุงเทพ, Café Amazon"
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="web" className="flex items-center gap-1.5">
-                  <Globe className="h-3.5 w-3.5" /> Website
-                </Label>
-                <Input
-                  id="web"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://example.com"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="fb" className="flex items-center gap-1.5">
-                  <Facebook className="h-3.5 w-3.5" /> Facebook Page
-                </Label>
-                <Input
-                  id="fb"
-                  value={facebook}
-                  onChange={(e) => setFacebook(e.target.value)}
-                  placeholder="https://facebook.com/yourpage"
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-3 pt-2">
-              <p className="text-xs text-muted-foreground">
-                * ระบุ Website หรือ Facebook อย่างน้อย 1 อย่าง
-              </p>
-              <Button
-                size="lg"
-                disabled={
-                  !businessName.trim() ||
-                  (!website.trim() && !facebook.trim()) ||
-                  mutation.isPending
-                }
-                onClick={() => mutation.mutate()}
-                className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
-              >
-                {mutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> กำลัง scan...
-                  </>
-                ) : (
-                  <>
-                    <Search className="h-4 w-4" /> Scan signals <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </Button>
-            </div>
-              </div>
+              <MultiScan enableCsv={false} />
             </TabsContent>
             <TabsContent value="batch">
-              <BatchScan analyze={analyze} />
+              <MultiScan enableCsv={true} />
             </TabsContent>
           </Tabs>
         </Card>
-
-        {mutation.isError && (
-          <div className="mx-auto mt-6 max-w-3xl rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            {(mutation.error as Error).message}
-          </div>
-        )}
-
-        {mutation.isPending && (
-          <div className="mx-auto mt-10 max-w-3xl space-y-3 text-center text-sm text-muted-foreground">
-            <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
-            <p>กำลัง scrape sources และวิเคราะห์ด้วย AI...</p>
-            <p className="text-xs">ใช้เวลา ~20-40 วินาที</p>
-          </div>
-        )}
-
-        {result && <Results data={result} />}
       </main>
     </div>
   );
@@ -473,52 +382,100 @@ function Results({ data }: { data: ServerResult }) {
   );
 }
 
-function BatchScan({
-  analyze,
-}: {
-  analyze: (args: { data: { businessName: string; website: string; facebook: string } }) => Promise<unknown>;
-}) {
-  const [rows, setRows] = useState<BatchRow[]>([]);
+function MultiScan({ enableCsv }: { enableCsv: boolean }) {
+  const analyze = useServerFn(analyzeBusinessSignals);
+  const [rows, setRows] = useState<BatchRow[]>([
+    { businessName: "", website: "", facebook: "", status: "pending" },
+  ]);
   const [running, setRunning] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const done = useMemo(() => rows.filter((r) => r.status === "done" || r.status === "error").length, [rows]);
+  const validRows = useMemo(
+    () => rows.filter((r) => r.businessName.trim() && (r.website.trim() || r.facebook.trim())),
+    [rows],
+  );
+  const done = useMemo(
+    () => rows.filter((r) => r.status === "done" || r.status === "error").length,
+    [rows],
+  );
   const completedResults = useMemo(
-    () => rows.filter((r): r is BatchRow & { result: ServerResult } => r.status === "done" && !!r.result).map((r) => r.result),
+    () =>
+      rows
+        .filter((r): r is BatchRow & { result: ServerResult } => r.status === "done" && !!r.result)
+        .map((r) => r.result),
     [rows],
   );
 
+  const updateRow = (i: number, patch: Partial<BatchRow>) =>
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const addRow = () =>
+    setRows((prev) => [...prev, { businessName: "", website: "", facebook: "", status: "pending" }]);
+  const removeRow = (i: number) =>
+    setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)));
+
   const handleFile = async (file: File) => {
-    const text = await file.text();
-    const parsed = parseCsv(text);
-    const mapped: BatchRow[] = parsed
-      .map((r) => ({
-        businessName: r["businessname"] || r["business_name"] || r["name"] || r["business"] || "",
-        website: r["website"] || r["url"] || r["web"] || "",
-        facebook: r["facebook"] || r["fb"] || r["facebook_url"] || "",
-        status: "pending" as const,
-      }))
-      .filter((r) => r.businessName && (r.website || r.facebook));
-    setRows(mapped);
+    setCsvError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      if (parsed.length === 0) {
+        setCsvError("ไม่พบข้อมูลใน CSV — ตรวจสอบว่าไฟล์มี header `businessName,website,facebook`");
+        return;
+      }
+      const mapped: BatchRow[] = parsed
+        .map((r) => ({
+          businessName: r["businessname"] || r["business_name"] || r["name"] || r["business"] || "",
+          website: r["website"] || r["url"] || r["web"] || "",
+          facebook: r["facebook"] || r["fb"] || r["facebook_url"] || r["facebook_page"] || "",
+          status: "pending" as const,
+        }))
+        .filter((r) => r.businessName && (r.website || r.facebook));
+      if (mapped.length === 0) {
+        setCsvError(
+          `อ่านได้ ${parsed.length} แถว แต่ไม่มีแถวไหนผ่านเกณฑ์ (ต้องมี businessName + Website หรือ Facebook อย่างน้อย 1)`,
+        );
+        return;
+      }
+      setRows(mapped);
+    } catch (e) {
+      setCsvError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const runAll = async () => {
     setRunning(true);
-    for (let i = 0; i < rows.length; i++) {
+    // Reset prior runs
+    setRows((prev) => prev.map((r) => ({ ...r, status: "pending", error: undefined, result: undefined })));
+    const snapshot = rows;
+    for (let i = 0; i < snapshot.length; i++) {
+      const row = snapshot[i];
+      if (!row.businessName.trim() || (!row.website.trim() && !row.facebook.trim())) {
+        setRows((prev) =>
+          prev.map((r, idx) =>
+            idx === i ? { ...r, status: "error", error: "ข้อมูลไม่ครบ (ต้องมีชื่อ + Website หรือ Facebook)" } : r,
+          ),
+        );
+        continue;
+      }
       setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "scanning" } : r)));
       try {
         const res = (await analyze({
           data: {
-            businessName: rows[i].businessName,
-            website: rows[i].website,
-            facebook: rows[i].facebook,
+            businessName: row.businessName.trim(),
+            website: row.website.trim(),
+            facebook: row.facebook.trim(),
           },
         })) as ServerResult;
-        setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "done", result: res } : r)));
+        setRows((prev) =>
+          prev.map((r, idx) => (idx === i ? { ...r, status: "done", result: res } : r)),
+        );
       } catch (e) {
         setRows((prev) =>
           prev.map((r, idx) =>
-            idx === i ? { ...r, status: "error", error: e instanceof Error ? e.message : String(e) } : r,
+            idx === i
+              ? { ...r, status: "error", error: e instanceof Error ? e.message : String(e) }
+              : r,
           ),
         );
       }
@@ -527,74 +484,161 @@ function BatchScan({
   };
 
   return (
-    <div className="grid gap-4">
-      <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm">
-        <p className="font-medium">รูปแบบ CSV</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          ต้องมี header: <code className="rounded bg-muted px-1">businessName,website,facebook</code> —
-          แต่ละแถวต้องมี businessName และอย่างน้อย 1 ใน website/facebook
-        </p>
-        <pre className="mt-2 overflow-x-auto rounded bg-background p-2 text-[11px]">
+    <div className="grid gap-5">
+      {enableCsv && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-sm">
+          <p className="font-medium">รูปแบบ CSV</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            ต้องมี header: <code className="rounded bg-muted px-1">businessName,website,facebook</code> —
+            แต่ละแถวต้องมี businessName และอย่างน้อย 1 ใน website/facebook (รองรับ comma / semicolon / tab และ UTF-8 BOM จาก Excel)
+          </p>
+          <pre className="mt-2 overflow-x-auto rounded bg-background p-2 text-[11px]">
 {`businessName,website,facebook
 โรงพยาบาลกรุงเทพ,https://www.bangkokhospital.com,https://facebook.com/bangkokhospitalclub
 Café Amazon,https://www.cafe-amazon.com,https://facebook.com/CafeAmazonOfficial`}
-        </pre>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void handleFile(f);
-            e.target.value = "";
-          }}
-        />
-        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={running}>
-          <Upload className="h-4 w-4" /> เลือกไฟล์ CSV
-        </Button>
-        <Button
-          onClick={runAll}
-          disabled={running || rows.length === 0}
-          className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
-        >
-          {running ? (<><Loader2 className="h-4 w-4 animate-spin" /> กำลัง scan {done}/{rows.length}</>) : (
-            <>เริ่ม scan {rows.length} บริษัท <ArrowRight className="h-4 w-4" /></>
+          </pre>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleFile(f);
+                e.target.value = "";
+              }}
+            />
+            <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={running}>
+              <Upload className="h-4 w-4" /> เลือกไฟล์ CSV
+            </Button>
+            {rows.length > 0 && rows.some((r) => r.businessName) && (
+              <span className="text-xs text-muted-foreground">
+                โหลดแล้ว {rows.filter((r) => r.businessName).length} แถว
+              </span>
+            )}
+          </div>
+          {csvError && (
+            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+              {csvError}
+            </div>
           )}
-        </Button>
-        {completedResults.length > 0 && (
-          <>
-            <Button
-              variant="outline"
-              onClick={() => downloadFile(
-                `batch-results-${Date.now()}.json`,
-                JSON.stringify(completedResults, null, 2),
-                "application/json",
+        </div>
+      )}
+
+      <div className="grid gap-3">
+        {rows.map((row, i) => (
+          <div
+            key={i}
+            className="grid gap-3 rounded-lg border border-border bg-background/40 p-3 sm:grid-cols-[1.2fr_1.4fr_1.4fr_auto] sm:items-end"
+          >
+            <div className="grid gap-1.5">
+              {i === 0 && <Label className="text-xs">ชื่อธุรกิจ *</Label>}
+              <Input
+                value={row.businessName}
+                onChange={(e) => updateRow(i, { businessName: e.target.value })}
+                placeholder="เช่น Café Amazon"
+                disabled={running}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              {i === 0 && (
+                <Label className="flex items-center gap-1.5 text-xs">
+                  <Globe className="h-3.5 w-3.5" /> Website
+                </Label>
               )}
-            >
-              <FileJson className="h-4 w-4" /> Download JSON
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => downloadFile(
-                `batch-results-${Date.now()}.csv`,
-                resultsToCsv(completedResults),
-                "text/csv;charset=utf-8",
+              <Input
+                value={row.website}
+                onChange={(e) => updateRow(i, { website: e.target.value })}
+                placeholder="https://example.com"
+                disabled={running}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              {i === 0 && (
+                <Label className="flex items-center gap-1.5 text-xs">
+                  <Facebook className="h-3.5 w-3.5" /> Facebook Page
+                </Label>
               )}
-            >
-              <FileSpreadsheet className="h-4 w-4" /> Download CSV
-            </Button>
-          </>
-        )}
+              <Input
+                value={row.facebook}
+                onChange={(e) => updateRow(i, { facebook: e.target.value })}
+                placeholder="https://facebook.com/yourpage"
+                disabled={running}
+              />
+            </div>
+            <div className="flex items-center justify-end">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => removeRow(i)}
+                disabled={running || rows.length === 1}
+                aria-label="ลบแถว"
+              >
+                <Trash2 className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {rows.length > 0 && (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Button variant="outline" size="sm" onClick={addRow} disabled={running}>
+          <Plus className="h-4 w-4" /> เพิ่มบริษัท
+        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {completedResults.length > 0 && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  downloadFile(
+                    `scan-results-${Date.now()}.json`,
+                    JSON.stringify(completedResults, null, 2),
+                    "application/json",
+                  )
+                }
+              >
+                <FileJson className="h-4 w-4" /> JSON
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  downloadFile(
+                    `scan-results-${Date.now()}.csv`,
+                    resultsToCsv(completedResults),
+                    "text/csv;charset=utf-8",
+                  )
+                }
+              >
+                <FileSpreadsheet className="h-4 w-4" /> CSV
+              </Button>
+            </>
+          )}
+          <Button
+            onClick={runAll}
+            disabled={running || validRows.length === 0}
+            className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
+          >
+            {running ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> scanning {done}/{rows.length}
+              </>
+            ) : (
+              <>
+                Scan {validRows.length} บริษัท <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {(running || done > 0) && rows.length > 0 && (
         <>
           <Progress value={(done / rows.length) * 100} />
-          <div className="max-h-80 overflow-y-auto rounded-md border border-border">
+          <div className="max-h-72 overflow-y-auto rounded-md border border-border">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-muted/80 text-left">
                 <tr>
@@ -613,18 +657,26 @@ Café Amazon,https://www.cafe-amazon.com,https://facebook.com/CafeAmazonOfficial
                   return (
                     <tr key={i} className="border-t border-border">
                       <td className="p-2 text-muted-foreground">{i + 1}</td>
-                      <td className="p-2 font-medium">{r.businessName}</td>
+                      <td className="p-2 font-medium">{r.businessName || <span className="text-muted-foreground">—</span>}</td>
                       <td className="p-2">
                         {r.status === "pending" && <span className="text-muted-foreground">รอ</span>}
-                        {r.status === "scanning" && <span className="inline-flex items-center gap-1 text-primary"><Loader2 className="h-3 w-3 animate-spin" /> scanning</span>}
+                        {r.status === "scanning" && (
+                          <span className="inline-flex items-center gap-1 text-primary">
+                            <Loader2 className="h-3 w-3 animate-spin" /> scanning
+                          </span>
+                        )}
                         {r.status === "done" && <span className="text-[color:var(--success)]">✓ done</span>}
                         {r.status === "error" && <span className="text-destructive">✗ error</span>}
                       </td>
-                      <td className="p-2 tabular-nums">{r.result ? `${Math.round((tcount / SIGNAL_KEYS.length) * 10)}/10` : "—"}</td>
-                      <td className="p-2 tabular-nums">{r.result ? `${tcount}/${SIGNAL_KEYS.length}` : "—"}</td>
+                      <td className="p-2 tabular-nums">
+                        {r.result ? `${Math.round((tcount / SIGNAL_KEYS.length) * 10)}/10` : "—"}
+                      </td>
+                      <td className="p-2 tabular-nums">
+                        {r.result ? `${tcount}/${SIGNAL_KEYS.length}` : "—"}
+                      </td>
                       <td className="p-2 text-muted-foreground">
-                        {r.error
-                          ?? (r.result?.facebookStatus && !r.result.facebookStatus.reachable
+                        {r.error ??
+                          (r.result?.facebookStatus && !r.result.facebookStatus.reachable
                             ? "⚠ FB ลิงก์เข้าไม่ได้"
                             : "")}
                       </td>
@@ -635,6 +687,15 @@ Café Amazon,https://www.cafe-amazon.com,https://facebook.com/CafeAmazonOfficial
             </table>
           </div>
         </>
+      )}
+
+      {completedResults.length > 0 && (
+        <div className="space-y-10 pt-4">
+          <h3 className="text-base font-semibold">รายงานผลลัพธ์ ({completedResults.length})</h3>
+          {completedResults.map((res, i) => (
+            <Results key={i} data={res} />
+          ))}
+        </div>
       )}
     </div>
   );
