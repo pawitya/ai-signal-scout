@@ -1,12 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import {
   Sparkles,
   Globe,
   Facebook,
-  Search,
   Loader2,
   Headphones,
   Clock,
@@ -20,6 +18,8 @@ import {
   FileJson,
   FileSpreadsheet,
   AlertTriangle,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,7 +81,11 @@ const SIGNAL_KEYS = [
 ] as const;
 
 function parseCsv(text: string): Array<Record<string, string>> {
-  // Minimal CSV parser with quoted field support
+  // Minimal CSV parser with quoted field support. Strips UTF-8 BOM and
+  // auto-detects ; as separator if the first header line contains no commas.
+  text = text.replace(/^\uFEFF/, "");
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  const sep = firstLine.includes(",") ? "," : firstLine.includes(";") ? ";" : firstLine.includes("\t") ? "\t" : ",";
   const rows: string[][] = [];
   let cur: string[] = [];
   let field = "";
@@ -94,7 +98,7 @@ function parseCsv(text: string): Array<Record<string, string>> {
       else field += c;
     } else {
       if (c === '"') inQ = true;
-      else if (c === ",") { cur.push(field); field = ""; }
+      else if (c === sep) { cur.push(field); field = ""; }
       else if (c === "\n" || c === "\r") {
         if (field.length || cur.length) { cur.push(field); rows.push(cur); cur = []; field = ""; }
         if (c === "\r" && text[i + 1] === "\n") i++;
