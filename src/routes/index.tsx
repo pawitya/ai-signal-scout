@@ -168,26 +168,6 @@ function downloadFile(filename: string, content: string, mime: string) {
 }
 
 function Index() {
-  const analyze = useServerFn(analyzeBusinessSignals);
-  const [businessName, setBusinessName] = useState("");
-  const [website, setWebsite] = useState("");
-  const [facebook, setFacebook] = useState("");
-
-  const mutation = useMutation<ServerResult, Error, void>({
-    mutationFn: async () => {
-      const res = await analyze({
-        data: {
-          businessName: businessName.trim(),
-          website: website.trim(),
-          facebook: facebook.trim(),
-        },
-      });
-      return res as ServerResult;
-    },
-  });
-
-  const result = mutation.data;
-
   return (
     <div className="min-h-screen bg-background">
       <div className="absolute inset-x-0 top-0 -z-10 h-[520px] bg-[image:var(--gradient-surface)]" />
@@ -226,95 +206,20 @@ function Index() {
           </p>
         </section>
 
-        <Card id="scan" className="mx-auto max-w-3xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
+        <Card id="scan" className="mx-auto max-w-4xl border-border bg-card p-6 shadow-[var(--shadow-card)] sm:p-8">
           <Tabs defaultValue="single">
             <TabsList className="mb-5">
-              <TabsTrigger value="single">Single scan</TabsTrigger>
+              <TabsTrigger value="single">Manual scan</TabsTrigger>
               <TabsTrigger value="batch">Batch (CSV upload)</TabsTrigger>
             </TabsList>
             <TabsContent value="single">
-              <div className="grid gap-5">
-            <div className="grid gap-2">
-              <Label htmlFor="biz">ชื่อธุรกิจ *</Label>
-              <Input
-                id="biz"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="เช่น โรงพยาบาลกรุงเทพ, Café Amazon"
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="web" className="flex items-center gap-1.5">
-                  <Globe className="h-3.5 w-3.5" /> Website
-                </Label>
-                <Input
-                  id="web"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://example.com"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="fb" className="flex items-center gap-1.5">
-                  <Facebook className="h-3.5 w-3.5" /> Facebook Page
-                </Label>
-                <Input
-                  id="fb"
-                  value={facebook}
-                  onChange={(e) => setFacebook(e.target.value)}
-                  placeholder="https://facebook.com/yourpage"
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-3 pt-2">
-              <p className="text-xs text-muted-foreground">
-                * ระบุ Website หรือ Facebook อย่างน้อย 1 อย่าง
-              </p>
-              <Button
-                size="lg"
-                disabled={
-                  !businessName.trim() ||
-                  (!website.trim() && !facebook.trim()) ||
-                  mutation.isPending
-                }
-                onClick={() => mutation.mutate()}
-                className="bg-[image:var(--gradient-primary)] shadow-[var(--shadow-elegant)] hover:opacity-95"
-              >
-                {mutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> กำลัง scan...
-                  </>
-                ) : (
-                  <>
-                    <Search className="h-4 w-4" /> Scan signals <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </Button>
-            </div>
-              </div>
+              <MultiScan enableCsv={false} />
             </TabsContent>
             <TabsContent value="batch">
-              <BatchScan analyze={analyze} />
+              <MultiScan enableCsv={true} />
             </TabsContent>
           </Tabs>
         </Card>
-
-        {mutation.isError && (
-          <div className="mx-auto mt-6 max-w-3xl rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            {(mutation.error as Error).message}
-          </div>
-        )}
-
-        {mutation.isPending && (
-          <div className="mx-auto mt-10 max-w-3xl space-y-3 text-center text-sm text-muted-foreground">
-            <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />
-            <p>กำลัง scrape sources และวิเคราะห์ด้วย AI...</p>
-            <p className="text-xs">ใช้เวลา ~20-40 วินาที</p>
-          </div>
-        )}
-
-        {result && <Results data={result} />}
       </main>
     </div>
   );
