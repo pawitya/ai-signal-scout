@@ -583,9 +583,13 @@ Café Amazon,https://www.cafe-amazon.com,https://facebook.com/CafeAmazonOfficial
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button variant="outline" size="sm" onClick={addRow} disabled={running}>
-          <Plus className="h-4 w-4" /> เพิ่มบริษัท
-        </Button>
+        {!enableCsv ? (
+          <Button variant="outline" size="sm" onClick={addRow} disabled={running}>
+            <Plus className="h-4 w-4" /> เพิ่มบริษัท
+          </Button>
+        ) : (
+          <span />
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {completedResults.length > 0 && (
             <>
