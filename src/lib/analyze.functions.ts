@@ -94,6 +94,7 @@ async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlSc
         url,
         formats: ["markdown"],
         onlyMainContent: true,
+        waitFor: 2500,
       }),
     });
     if (!res.ok) {
@@ -105,24 +106,40 @@ async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlSc
     const md = (data?.data?.markdown ?? "").slice(0, 8000);
     const status = data?.data?.metadata?.statusCode;
     const lower = md.toLowerCase();
+    // Strong "dead page" signals only — Facebook explicit error copy.
+    // We deliberately do NOT mark a page dead just because the markdown is short:
+    // Facebook often renders behind a login wall and returns minimal text even
+    // when the page is perfectly accessible to real users.
     const deadHints = [
       "this content isn't available",
       "content isn't available right now",
-      "page isn't available",
-      "page not found",
+      "this page isn't available",
+      "page isn't available right now",
       "the link you followed may be broken",
+      "the page may have been removed",
+      "sorry, this page isn't available",
       "ลิงก์ที่คุณใช้อาจชำรุด",
       "เนื้อหานี้ไม่พร้อมใช้งาน",
       "ไม่พร้อมใช้งานในขณะนี้",
+      "หน้านี้ไม่พร้อมใช้งาน",
     ];
-    const looksDead = md.trim().length < 200 || deadHints.some((h) => lower.includes(h));
+    const httpDead = typeof status === "number" && status >= 400;
+    const explicitDead = deadHints.some((h) => lower.includes(h));
+    // Treat near-empty pages as inconclusive (not dead) so FB login-walled pages
+    // are not falsely flagged. Only HTTP errors or explicit dead copy = dead.
+    const looksDead = httpDead || explicitDead;
+    const reason = httpDead
+      ? `HTTP ${status}`
+      : explicitDead
+        ? "พบข้อความว่าหน้านี้ถูกลบ/ไม่พร้อมใช้งาน"
+        : undefined;
     return {
       url,
       title: data?.data?.metadata?.title,
       markdown: md,
       httpStatus: status,
-      reachable: !looksDead && (status === undefined || status < 400),
-      unavailableReason: looksDead ? "ตรวจพบหน้านี้ว่างเปล่า/ถูกลบ/ไม่พร้อมใช้งาน" : undefined,
+      reachable: !looksDead,
+      unavailableReason: reason,
     };
   } catch (e) {
     return { url, error: e instanceof Error ? e.message : String(e) };
