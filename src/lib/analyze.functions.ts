@@ -105,24 +105,34 @@ async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlSc
     const md = (data?.data?.markdown ?? "").slice(0, 8000);
     const status = data?.data?.metadata?.statusCode;
     const lower = md.toLowerCase();
+    // Only flag as dead on EXPLICIT "not available" text. Facebook login walls
+    // and bot-protected pages return short markdown but the page itself is live —
+    // we must not mark those as unreachable just because content is thin.
     const deadHints = [
       "this content isn't available",
       "content isn't available right now",
-      "page isn't available",
-      "page not found",
+      "this page isn't available",
       "the link you followed may be broken",
+      "the page you requested cannot be displayed",
       "ลิงก์ที่คุณใช้อาจชำรุด",
       "เนื้อหานี้ไม่พร้อมใช้งาน",
       "ไม่พร้อมใช้งานในขณะนี้",
+      "หน้าที่คุณค้นหาไม่พบ",
     ];
-    const looksDead = md.trim().length < 200 || deadHints.some((h) => lower.includes(h));
+    const hitDeadHint = deadHints.some((h) => lower.includes(h));
+    const httpDead = typeof status === "number" && status >= 400;
+    const looksDead = httpDead || hitDeadHint;
     return {
       url,
       title: data?.data?.metadata?.title,
       markdown: md,
       httpStatus: status,
-      reachable: !looksDead && (status === undefined || status < 400),
-      unavailableReason: looksDead ? "ตรวจพบหน้านี้ว่างเปล่า/ถูกลบ/ไม่พร้อมใช้งาน" : undefined,
+      reachable: !looksDead,
+      unavailableReason: httpDead
+        ? `HTTP ${status}`
+        : hitDeadHint
+          ? "พบข้อความระบุว่าเพจถูกลบ/ไม่พร้อมใช้งาน"
+          : undefined,
     };
   } catch (e) {
     return { url, error: e instanceof Error ? e.message : String(e) };
